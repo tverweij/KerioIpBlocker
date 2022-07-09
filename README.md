@@ -2,6 +2,7 @@
 Blocks abused IP Addresses
 
 The KerioIPBlocker blocks IP Addresses that are connecting to your environment, but are listed as 100% confident that they are abused.
+The program doesn't check or block what is already blocked by Kerio. It only blocks malicious IP's that really *connect*.
 
 This software is build in the next generation of Visual Basic - RemObjects Mercury.
 
