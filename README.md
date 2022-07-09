@@ -29,3 +29,9 @@ Schedule the software on a Windows machine, with start on boot.
 
 The parameters are:
 KerioIpBlocker.exe -P:AdminPassword -M:MaxCountOfBlockedAddresses -A:APIKeyForAbuseDB
+
+For MaxCountOfBlockedAddresses:
+This is the maximum count of addresses that will be blocked at one time. For performance, don't make this too high.
+I myself use 50. 
+
+Each blocked address will be blocked for of 24 hours, or will be freed when the maximum count of addresses is exceeded; in that case the oldest blocked address will be unblocked.
