@@ -21,6 +21,9 @@ Set the Action to *Drop*
 Create a new Traffic Rule named *Block detected outgoing intrusion IP's*, set the Destination to the *AbuseIP DB Blocked* address group and everything else to *Any*.
 Set the Action to *Drop*
 
+**Step 4**
+Any traffice rule (must be of the kind *Allow*) that you want to monitor for abusive connection has to be logged (dubbleclick on the allow column and check *log connections*)
+
 # Get an API Key at AbuseIPDB
 
 Go to https://www.abuseipdb.com/pricing and select a plan - then create your account and create your API key
