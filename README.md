@@ -3,6 +3,8 @@ Blocks abused IP Addresses
 
 The KerioIPBlocker blocks IP Addresses that are connecting to your environment, but are listed as 100% confident that they are abused.
 
+This software is build in the next generation of Visual Basic - RemObjects Mercury.
+
 # Configuration of the Kerio Firewall
 
 **Step 1**
@@ -22,6 +24,7 @@ Set the Action to *Drop*
 # Get an API Key at AbuseIPDB
 
 Go to https://www.abuseipdb.com/pricing and select a plan - then create your account and create your API key
+Depending on your plan, you will have an maximum amount of checks - when your checks for today are exhausted, no new IPAddresses will be blocked as we can not check them anymore.
 
 # Schedule the software
 
