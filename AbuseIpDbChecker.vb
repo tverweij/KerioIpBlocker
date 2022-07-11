@@ -1,4 +1,4 @@
-﻿Imports System.Net
+Imports System.Net
 Imports Microsoft.VisualBasic
 
 Public Module AbuseDbChecker
@@ -54,18 +54,19 @@ Public Module AbuseDbChecker
       //check online
       Try
         Dim IpOk = IsIpOk(IP)
-        Cache.Add(IP, IpOk)
+        Cache.Add(IP, IpOk < 100)
         Cache_TTL.Add(IP, Now)
         //update the lookup file
         My.Computer.FileSystem.WriteAllText(LookupFile, IP & "|" & IpOk.ToString & "|" & Now.ToString & Chr(10), True)
       Catch ex As Exception
         RemObjects.Elements.RTL.writeLn("IP Lookup error: " & ex.Message)
+        Return True
       End Try
     End If
     Return Cache(IP)
   End Function
 
-  Public Function IsIpOk(Ip As String) As Boolean
+  Public Function IsIpOk(Ip As String) As Integer
     Try
       Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create($"https://api.abuseipdb.com/api/v2/check?ipAddress={Ip}"), HttpWebRequest)
       myReq.Method = "GET"
@@ -80,7 +81,7 @@ Public Module AbuseDbChecker
       //{"data":{"ipAddress":"193.201.9.89","isPublic":true,"ipVersion":4,"isWhitelisted":false,"abuseConfidenceScore":100,"countryCode":"RU","usageType":"Data Center\/Web Hosting\/Transit","isp":"Infolink LLC","domain":"informlink.ru","hostnames":[],"totalReports":211,"numDistinctUsers":41,"lastReportedAt":"2022-07-07T13:00:02+00:00"}}
       Dim Score As String = Split(ReturnValue, """abuseConfidenceScore"":")(1)
       Score = Split(Score, ",")(0)
-      Return Val(Score) < 100
+      Return CInt(Val(Score))
     Catch ex As Exception
       System.Diagnostics.Debug.Print("Error: " & ex.Message)
       Throw ex
@@ -152,5 +153,6 @@ Public Module AbuseDbChecker
       My.Computer.FileSystem.WriteAllText(LookupFile, NewLookupFile.ToString, false)
     End If
   End Sub
+
 
 End Module
