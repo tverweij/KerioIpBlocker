@@ -37,10 +37,8 @@ Public Module AbuseDbChecker
   Private Function ExistsInCache(IP As String) As Boolean
     If Cache_TTL.ContainsKey(IP) Then
       If DateAdd(DateInterval.Hour, UseTTL, Cache_TTL(IP)) < DateTime.Now Then
-        //entry is not valid anymore -> remove the entry
-        Cache_TTL.Remove(IP)
-        Cache.Remove(IP)
-        Return False
+          //entry is not valid anymore
+          Return False
       Else
         Return True
       End If
@@ -49,24 +47,37 @@ Public Module AbuseDbChecker
     End If
   End Function
 
+
   Public Function CheckIP(IP As String) As Boolean
     If Not ExistsInCache(IP) Then
       //check online
       Try
         Dim IpOk = IsIpOk(IP)
-        Cache.Add(IP, IpOk < 100)
-        Cache_TTL.Add(IP, Now)
+        If Cache.ContainsKey(IP) Then
+          Cache(IP) = IpOk < 100
+          Cache_TTL(IP) = now
+        Else
+          Cache.Add(IP, IpOk < 100)
+          Cache_TTL.Add(IP, Now)
+        End If
         //update the lookup file
         My.Computer.FileSystem.WriteAllText(LookupFile, IP & "|" & IpOk.ToString & "|" & Now.ToString & Chr(10), True)
+        RemoveWhenOverTTL = False //check succeeded
       Catch ex As Exception
         RemObjects.Elements.RTL.writeLn("IP Lookup error: " & ex.Message)
-        Return True
+        //check the cache again for old entries
+        If Cache.ContainsKey(IP) Then
+          Return Cache(IP)
+        Else
+          //can not check, so just allow
+          Return True
+        End If
       End Try
     End If
     Return Cache(IP)
   End Function
 
-  Public Function IsIpOk(Ip As String) As Integer
+  Public Function IsIpOk(Ip As String) As Boolean
     Try
       Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create($"https://api.abuseipdb.com/api/v2/check?ipAddress={Ip}"), HttpWebRequest)
       myReq.Method = "GET"
@@ -81,7 +92,7 @@ Public Module AbuseDbChecker
       //{"data":{"ipAddress":"193.201.9.89","isPublic":true,"ipVersion":4,"isWhitelisted":false,"abuseConfidenceScore":100,"countryCode":"RU","usageType":"Data Center\/Web Hosting\/Transit","isp":"Infolink LLC","domain":"informlink.ru","hostnames":[],"totalReports":211,"numDistinctUsers":41,"lastReportedAt":"2022-07-07T13:00:02+00:00"}}
       Dim Score As String = Split(ReturnValue, """abuseConfidenceScore"":")(1)
       Score = Split(Score, ",")(0)
-      Return CInt(Val(Score))
+      Return Val(Score) < 100
     Catch ex As Exception
       System.Diagnostics.Debug.Print("Error: " & ex.Message)
       Throw ex
