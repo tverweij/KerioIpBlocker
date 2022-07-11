@@ -45,3 +45,10 @@ This is the maximum count of addresses that will be blocked at one time. For per
 I myself use 50. 
 
 Each blocked address will be blocked for 24 hours, or will be freed when the maximum count of addresses is exceeded; in that case the oldest blocked address will be unblocked.
+
+# How does it work?
+
+The software reads the Kerio Control connection log every 15 seconds and all new connections in this log are checked against the AbuseIPDB. To minimize the amount of checks on the internet, the results of those checks are cached (and twice a day a blacklist of minimum 10.000 addresses is downloaded and chached). Every check starts with a check in the cache, if it is found the age of the cached value is checked; when it is older than 24 hours or not in the cache at all, it is rechecked online and the cache will be updated with the new results (and is then again valid for 24 hours). 
+When the maximum online checks (based on the plan you chose at AbuseIPDB) are exhaused, the cache is used instead; when an entry is in the cache (no matter what age), this result will be used. When it is not in the cache after the online checks are exhausted, the IP is allowed as we have no way of validating it.
+When an IP is blacklisted at AbuseIPDB (means: confidence score of 100%), the IP address is added to the blocking IP Group. And when the maximum amount of blocked IP Addresses is reached, the oldest address in this group is freed to make room for the new address.
+The maximum amount of time to remain in the blocked group for an IP address is 24 hours. After that, the address is freed and will only be re-blocked when it tries to connect again.
