@@ -15,12 +15,14 @@ Create a new IP Address Group named *AbuseIP DB Blocked* and add the address 254
 **Step 2**
 
 Create a new Traffic Rule named *Block detected incoming intrusion IP's*, set the Source to the *AbuseIP DB Blocked* address group and everything else to *Any*.
-Set the Action to *Drop*
+
+Set the Action to *Drop* - make sure this is the first rule (op top) in the Traffic Rules.
 
 **Step 3**
 
 Create a new Traffic Rule named *Block detected outgoing intrusion IP's*, set the Destination to the *AbuseIP DB Blocked* address group and everything else to *Any*.
-Set the Action to *Drop*
+
+Set the Action to *Drop* - place this rule as second, below the rule in step 2. 
 
 **Step 4**
 
