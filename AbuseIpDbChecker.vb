@@ -1,7 +1,9 @@
 Imports System.Net
 Imports Microsoft.VisualBasic
 
-Public Module AbuseDbChecker
+Public Class AbuseIpDbChecker
+  Implements BlackListInterface
+
   /////////////////////////////////////////////////////////////////////////////////////////
   //                                                                                     //
   // Implementation of the AbuseDb IP Checker                                            //
@@ -24,45 +26,24 @@ Public Module AbuseDbChecker
   //                                                                                     //
   /////////////////////////////////////////////////////////////////////////////////////////
 
-  Public Property API_Key As String
+  //Interface /////////////////////////////////////////////////////////////////////////////
 
-  //IP Cache
-  Private Cache As New RemObjects.Elements.RTL.Dictionary(Of String, Boolean)
-  Private Cache_TTL As New RemObjects.Elements.RTL.Dictionary(Of String, DateTime)
-  Private UseTTL As Integer = 24 //cache is valid for 24 hours
+  Public Property API_Key As String Implements BlackListInterface.API_Key
 
-  Private BlackListFile As String = Environ("APPDATA") & "\AbuseIPDB_BackListCache.txt"
-  Private LookupFile As String = Environ("APPDATA") & "\AbuseIPDB_LookupCache.txt"
-
-  Private Function ExistsInCache(IP As String) As Boolean
-    If Cache_TTL.ContainsKey(IP) Then
-      If DateAdd(DateInterval.Hour, UseTTL, Cache_TTL(IP)) < DateTime.Now Then
-          //entry is not valid anymore
-          Return False
-      Else
-        Return True
-      End If
-    Else
-      Return False
-    End If
-  End Function
-
-
-  Public Function CheckIP(IP As String) As Boolean
+  Public Function CheckIP(IP As String) As Boolean Implements BlackListInterface.CheckIP
     If Not ExistsInCache(IP) Then
       //check online
       Try
         Dim IpOk = IsIpOk(IP)
         If Cache.ContainsKey(IP) Then
-          Cache(IP) = IpOk < 100
-          Cache_TTL(IP) = now
+          Cache(IP) = IpOk
+          Cache_TTL(IP) = Now
         Else
-          Cache.Add(IP, IpOk < 100)
+          Cache.Add(IP, IpOk)
           Cache_TTL.Add(IP, Now)
         End If
         //update the lookup file
         My.Computer.FileSystem.WriteAllText(LookupFile, IP & "|" & IpOk.ToString & "|" & Now.ToString & Chr(10), True)
-        RemoveWhenOverTTL = False //check succeeded
       Catch ex As Exception
         RemObjects.Elements.RTL.writeLn("IP Lookup error: " & ex.Message)
         //check the cache again for old entries
@@ -77,7 +58,103 @@ Public Module AbuseDbChecker
     Return Cache(IP)
   End Function
 
-  Public Function IsIpOk(Ip As String) As Boolean
+  Private BlackListRead As Boolean = False
+  //get the (max) 10.000 most misused IP's to fill the cache (100.000 for Basic and 500.000 for premium) - only IP addresses that are 100% certain misused.
+  Public Sub ReadBlacklist Implements BlackListInterface.ReadBlacklist
+    Dim BlackList As String
+    Try
+      Dim ReReadBlackList = Not System.IO.file.Exists(BlackListFile)
+      If Not ReReadBlackList Then
+        ReReadBlackList = DateDiff(DateInterval.Hour, System.IO.File.GetLastWriteTime(BlackListFile), Now) > 12
+      End If
+      If ReReadBlackList Then
+        BlackListRead = False
+        Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create("https://api.abuseipdb.com/api/v2/blacklist"), HttpWebRequest)
+        myReq.Method = "GET"
+        myReq.Headers.Add("Key", API_Key)
+        myReq.Accept = "text/plain"
+
+        Dim myResp = myReq.GetResponse
+        Dim myReader = New System.IO.StreamReader(myResp.GetResponseStream)
+
+        BlackList = myReader.ReadToEnd
+        //save the blacklist for re-use
+        My.Computer.FileSystem.WriteAllText(BlackListFile, BlackList, False)
+      Else
+        //read the saved cache
+        BlackList = My.Computer.FileSystem.ReadAllText(BlackListFile)
+      End If
+    Catch ex As Exception
+      //we load the last saved blacklist
+      BlackList = My.Computer.FileSystem.ReadAllText(BlackListFile)
+    End Try
+
+    //Load the blacklist in the cache
+    If Not BlackListRead Then
+      For Each IP As String  In Split(BlackList, Chr(10))
+        If Not ExistsInCache(IP) Then
+          Cache.Add(IP, False)
+          Cache_TTL.Add(IP, Now)
+        Else
+          Cache_TTL(IP) = Now //update the TTL
+        End If
+      Next
+      BlackListRead = True
+    End If
+  End Sub
+
+  Public Sub ReadLookupCache Implements BlackListInterface.ReadLookupCache
+    If System.IO.file.Exists(LookupFile) Then
+      Dim Lookup As String = My.Computer.FileSystem.ReadAllText(LookupFile)
+      Dim NewLookupFile As New RemObjects.Elements.RTL.StringBuilder
+
+      //Load the existing (and still valid) lookups in the cache
+      Dim ToIterate = Split(Lookup, Chr(10))
+      Array.Reverse(ToIterate)
+      For Each IP_TTL As String  In ToIterate //latest lookups read first
+        If IP_TTL.Length > 0 Then
+          Dim IP = Split(IP_TTL, "|")(0)
+          Dim IpOk = CBool(Split(IP_TTL, "|")(1))
+          Dim TTL_String = Split(IP_TTL, "|")(2)
+          Dim TTL = CDate(TTL_String)
+
+          If Not ExistsInCache(IP) Then
+            Cache.Add(IP, IpOk)
+            Cache_TTL.Add(IP, TTL)
+            NewLookupFile.Append(IP & "|" & IpOk.ToString & "|" & TTL_String & Chr(10))
+          End If
+        End If
+      Next
+      //write the file again, but only with the still valid entries
+      My.Computer.FileSystem.WriteAllText(LookupFile, NewLookupFile.ToString, false)
+    End If
+  End Sub
+
+  /////////////////////////////////////////////////////////////////////////////////////////
+
+  // Implementation ///////////////////////////////////////////////////////////////////////
+
+  Private BlackListFile As String = Environ("APPDATA") & "\AbuseIPDB_BackListCache.txt"
+  Private LookupFile As String = Environ("APPDATA") & "\AbuseIPDB_LookupCache.txt"
+
+  Private Cache As New RemObjects.Elements.RTL.Dictionary(Of String, Boolean)
+  Private Cache_TTL As New RemObjects.Elements.RTL.Dictionary(Of String, DateTime)
+  Private UseTTL As Integer = 24 //cache is valid for 24 hours
+
+  Private Function ExistsInCache(IP As String) As Boolean
+    If Cache_TTL.ContainsKey(IP) Then
+      If DateAdd(DateInterval.Hour, UseTTL, Cache_TTL(IP)) < DateTime.Now Then
+          //entry is not valid anymore
+          Return False
+      Else
+        Return True
+      End If
+    Else
+      Return False
+    End If
+  End Function
+
+  Private Function IsIpOk(Ip As String) As Boolean
     Try
       Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create($"https://api.abuseipdb.com/api/v2/check?ipAddress={Ip}"), HttpWebRequest)
       myReq.Method = "GET"
@@ -99,71 +176,4 @@ Public Module AbuseDbChecker
     End Try
   End Function
 
-  //get the (max) 10.000 most misused IP's to fill the cache (100.000 for Basic and 500.000 for premium) - only IP addresses that are 100% certain misused.
-  Public Sub ReadBlacklist
-    Dim BlackList As String
-    Try
-      Dim ReReadBlackList = Not System.IO.file.Exists(BlackListFile)
-      If Not ReReadBlackList Then
-        ReReadBlackList = DateDiff(DateInterval.Hour, System.IO.File.GetLastWriteTime(BlackListFile), Now) > 12
-      End If
-      If ReReadBlackList Then
-        Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create("https://api.abuseipdb.com/api/v2/blacklist"), HttpWebRequest)
-        myReq.Method = "GET"
-        myReq.Headers.Add("Key", API_Key)
-        myReq.Accept = "text/plain"
-
-        Dim myResp = myReq.GetResponse
-        Dim myReader = New System.IO.StreamReader(myResp.GetResponseStream)
-
-        BlackList = myReader.ReadToEnd
-        //save the blacklist for re-use
-        My.Computer.FileSystem.WriteAllText(BlackListFile, BlackList, False)
-      End If
-    Catch ex As Exception
-      //we load the last saved blacklist
-      BlackList = My.Computer.FileSystem.ReadAllText(BlackListFile)
-    End Try
-
-    //Load the blacklist in the cache
-    For Each IP As String  In Split(BlackList, Chr(10))
-      If Not ExistsInCache(IP) Then
-        Cache.Add(IP, False)
-        Cache_TTL.Add(IP, Now)
-      Else
-        Cache_TTL(IP) = Now //update the TTL
-      End If
-    Next
-  End Sub
-
-  Public Sub ReadLookupCache
-    If System.IO.file.Exists(LookupFile) Then
-      Dim Lookup As String = My.Computer.FileSystem.ReadAllText(LookupFile)
-      Dim NewLookupFile As New RemObjects.Elements.RTL.StringBuilder
-
-      //Load the existing (and still valid) lookups in the cache
-      Dim ToIterate = Split(Lookup, Chr(10))
-      Array.Reverse(ToIterate)
-      For Each IP_TTL As String  In ToIterate //latest lookups read first
-        If IP_TTL.Length > 0 Then
-          Dim IP = Split(IP_TTL, "|")(0)
-          Dim IpOk = CBool(Split(IP_TTL, "|")(1))
-          Dim TTL_String = Split(IP_TTL, "|")(2)
-          Dim TTL = CDate(TTL_String)
-          If DateAdd(DateInterval.Hour, 24, TTL) > Now Then
-            //still valid
-            If Not ExistsInCache(IP) Then
-              Cache.Add(IP, IpOk)
-              Cache_TTL.Add(IP, TTL)
-            End If
-            NewLookupFile.Append(IP & "|" & IpOk.ToString & "|" & TTL_String & Chr(10))
-          End If
-        End If
-      Next
-      //write the file again, but only with the still valid entries
-      My.Computer.FileSystem.WriteAllText(LookupFile, NewLookupFile.ToString, false)
-    End If
-  End Sub
-
-
-End Module
+End Class
