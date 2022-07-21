@@ -4,6 +4,11 @@ Blocks abused IP Addresses
 The KerioIPBlocker blocks IPv4 Addresses that are connecting to your environment, but are listed as 100% confident that they are abused.
 The program doesn't check or block what is already blocked by Kerio. It only blocks malicious IP's that really *connect*.
 
+Besides blocking, the software also reports failed connection attemps to the AbuseIPDB.
+
+**Important** If you upgrade, you need to add a new traffic rule, see step 5 at the Configuration of the Kerio Firewall.
+
+
 This software is build in the next generation of Visual Basic - RemObjects Mercury.
 
 **Note** As I have Ipv4 only, the software is not tested with IPv6
@@ -18,7 +23,7 @@ Create a new IP Address Group named *AbuseIP DB Blocked* and add the address 254
 
 Create a new Traffic Rule named *Block detected incoming intrusion IP's*, set the Source to the *AbuseIP DB Blocked* address group and everything else to *Any*.
 
-Set the Action to *Drop* - make sure this is the first rule (op top) in the Traffic Rules.
+Set the Action to *Drop* - make this rule is the first rules (op top) in the Traffic Rules.
 
 **Step 3**
 
@@ -29,6 +34,15 @@ Set the Action to *Drop* - place this rule as second, below the rule in step 2.
 **Step 4**
 
 Any traffice rule (must be of the kind *Allow*) that you want to monitor for abusive connection has to be logged (double-click on the allow column and check *log connections*)
+
+**Step 5** (new, needed for reporting of abuse - prevent reporting yourself!)
+
+Create a new Traffic Rule named *Block other traffic from internal networks*, set the Source to the *Trusted/Local Interfaces*, *All VPN Tunnels* and *VPN Clients*, everything else to *Any*. Set the action of this traffic rule to *Drop*, and if you want, log the packets.
+
+Make sure this rule is the last rule in the traffic rules, just before the rule *Block Other Traffic*
+
+*This step is important, as everything that is blocked on the rule Block other traffic will be reported to AbuseIpDB - The creation of this extra rule will make sure that blocked connections from your internal network wont be reported*
+
 
 # Get an API Key at AbuseIPDB
 
