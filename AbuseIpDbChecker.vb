@@ -74,7 +74,7 @@ Public Class AbuseIpDbChecker
       End If
       If ReReadBlackList Then
         BlackListRead = False
-        Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create("https://api.abuseipdb.com/api/v2/blacklist"), HttpWebRequest)
+        Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create("https://api.abuseipdb.com/api/v2/blacklist?limit=500000"), HttpWebRequest)
         myReq.Method = "GET"
         myReq.Headers.Add("Key", API_Key)
         myReq.Accept = "text/plain"
