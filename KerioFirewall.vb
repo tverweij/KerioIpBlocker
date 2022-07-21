@@ -1,3 +1,4 @@
+Imports System.Text
 Imports System.Net
 Imports System.Net.NetworkInformation
 Imports System.Linq
@@ -8,15 +9,20 @@ Public Class KerioFirewall
 
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   //                                                                                                               //
+  // Implementation of the Kerio firewall communication                                                            //
+  //---------------------------------------------------------------------------------------------------------------//
+  //                                                                                                               //
   // Firewall communication - we assume that the firewall is the gateway of this machine                           //
   //                                                                                                               //
   // The only implemented parts are needed for the KerioIPBlocker                                                  //
   //                                                                                                               //
   // More API information, see:                                                                                    //
   // https://www.gfi.com/products-and-solutions/network-security-solutions/kerio-control/resources/developer-zone  //                                                                                 //
+  //                                                                                                               //
   ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  Public Property AdminPassword As String
+  Public Property UserName As String Implements FirewallInterface.UserName
+  Public Property Password As String Implements FirewallInterface.Password
 
   // initialization ///////////////////////////////////////////////////////////////////////
 
@@ -30,6 +36,13 @@ Public Class KerioFirewall
   Dim Cookie2 As Cookie
 
   Private Function GetGateWay() As IPAddress
+    //accept all certificates on the SSL connection to the firewall as we are going to connect on IP Address
+    System.Net.ServicePointManager.ServerCertificateValidationCallback =
+                                          Function(se As Object, cert As System.Security.Cryptography.X509Certificates.X509Certificate,
+                                          chain As System.Security.Cryptography.X509Certificates.X509Chain, sslerror As System.Net.Security.SslPolicyErrors)
+                                            Return True
+                                          End Function
+
      //we do a traceroute to the first IP - this is the current active gateway
     Dim pinger As Ping = New Ping
     Dim pingerOptions As PingOptions = New PingOptions(1, True) //return the first hop only
@@ -53,7 +66,10 @@ Public Class KerioFirewall
 
   //Login in to the firewall as Admin
   Public Sub Login Implements FirewallInterface.Login
-    Dim Result = CallRpc("{""jsonrpc"":""2.0"",""id"":1,""method"":""Session.login"",""params"":{""userName"":""admin"",""password"":""" & AdminPassword & """,""application"":{""name"":""KerioIPBlocker"",""vendor"":""buildIT IT-Solutions BV"",""version"":""1.0""}}}")
+    If UserName Is Nothing Then
+      UserName = "admin" //if the username is not specified use admin
+    End If
+    Dim Result = CallRpc("{""jsonrpc"":""2.0"",""id"":1,""method"":""Session.login"",""params"":{""userName"":""" & UserName & """,""password"":""" & Password & """,""application"":{""name"":""KerioIPBlocker"",""vendor"":""buildIT IT-Solutions BV"",""version"":""1.0""}}}")
     Result = Result.Substring(Result.IndexOf("""token"":")+9)
     Cookie = Result.Substring(0, Result.Length - 3)
   End Sub
@@ -111,7 +127,9 @@ Public Class KerioFirewall
 
   //Add a hos entry to the IP Address Groups
   Public Sub AddIPEntry(entry As GroupEntry) Implements FirewallInterface.AddIPEntry
-    Dim Description = Date.Now.ToString
+    If entry.IP = Ip Then
+      Exit Sub //never block the interface that we are working on
+    End If
     CallRpc("{""jsonrpc"":""2.0"",""id"":1,""method"":""IpAddressGroups.create"",""params"":{""groups"":[{""groupId"": """ & entry.Group.Id & """,""groupName"":""" & entry.Group.Name & """,""enabled"":true,""description"":""" & entry.Desc & """,""host"":""" & entry.IP & """,""Type"":""Host""}]}}")
   End Sub
 
@@ -119,6 +137,38 @@ Public Class KerioFirewall
   Public Sub ApplyIPChanges Implements FirewallInterface.ApplyIPChanges
     CallRpc("{""jsonrpc"":""2.0"",""id"":1,""method"":""IpAddressGroups.apply""}")
   End Sub
+
+  Public Function GetBlockedConnections As RemObjects.Elements.RTL.Dictionary(Of String, String) Implements FirewallInterface.GetBlockedConnections
+    Dim ReturnValue As New RemObjects.Elements.RTL.Dictionary(Of String, String)
+    Dim TheLog = Split(GetLog("filter"), Chr(13)+Chr(10))
+    Dim TheDay As String =""
+    Array.Reverse(TheLog)
+
+    //loop the lines
+    For Each line As String In TheLog
+      if line.Length > 0 then
+        If TheDay.Length = 0 Then
+          TheDay = line.Substring(0,3)
+        End If
+        If TheDay = line.Substring(0,3) Then //only today
+          If line.Contains("DROP ""Block other traffic"" packet") Then
+            If line.Contains("proto:TCP") Then //only TCP connections
+              Dim OriginIP = ParseBlockedIP(line)
+              Dim DestPort = ParseBlockedPort(line).trim
+              If Not ReturnValue.ContainsKey(OriginIP) Then
+                ReturnValue.Add(OriginIP, DestPort)
+              ElseIf Not Split(ReturnValue(OriginIP), ",").Contains(DestPort) Then
+                ReturnValue(OriginIP) = ReturnValue(OriginIP) & "," & DestPort
+              End If
+            End If
+          End If
+        Else
+          Exit For
+        End If
+      End If
+    Next
+    Return ReturnValue
+  End Function
 
   Public Function GetConnectionIPAdresses As RemObjects.Elements.RTL.List(Of String) Implements FirewallInterface.GetConnectionIPAdresses
     Dim ReturnValue As New RemObjects.Elements.RTL.List(Of String)
@@ -155,12 +205,24 @@ Public Class KerioFirewall
 
   // implementation ///////////////////////////////////////////////////////////////////////
 
-  Private FromLine As New System.Collections.Generic.Dictionary(Of String, Integer)
+  Private Property FromLine(logName As String) As Integer
+    //the log pointer is saved in an index file to prevent the logs from being completely read after a software restart
+    Get
+      Dim IndexName As String = Environ("APPDATA") & "\" & logName & ".index"
+      If System.IO.file.Exists(IndexName) Then
+        Return CInt(Val(My.Computer.FileSystem.ReadAllText(IndexName)))
+      Else
+        Return 0
+      End If
+    End Get
+    Set (value As Integer)
+      Dim IndexName As String = Environ("APPDATA") & "\" & logName & ".index"
+      My.Computer.FileSystem.WriteAllText(IndexName, value.ToString, false)
+    End Set
+  End Property
+  
   Private Function GetLog(whatLog As String) As String
     Dim myReq As HttpWebRequest
-    If Not FromLine.ContainsKey(whatLog) Then
-      FromLine.Add(whatLog, 0)
-    End If
     For i As Integer = 0 To 1
       //This RPC call returns a download link
       Dim Result = CallRpc("{""jsonrpc"":""2.0"",""id"":1,""method"":""Logs.exportLog"",""params"":{""logName"":""" & whatLog & """,""fromLine"":" & FromLine(whatLog).ToString & ",""countLines"":-1,""type"":""PlainText""}}")
@@ -232,6 +294,15 @@ Public Class KerioFirewall
       System.Diagnostics.Debug.Print("Error: " & ex.Message)
       Throw ex
     End Try
+  End Function
+
+  Private Function ParseBlockedIP(logLine As String) As String
+    Return Split(Split(Split(Split(logLine, " -> ")(0), ":TCP, len:")(1), ", ")(1), ":")(0)
+  End Function
+  //:TCP, len:40, 59.7.41.169:34898 -> 10.21.7.47:23,
+
+  Private Function ParseBlockedPort(logLine As String) As String
+    Return Split(Split(Split(logLine, " -> ")(1), ",")(0), ":")(1)
   End Function
 
   Private Function ParseOriginIP(logLine As String) As String
