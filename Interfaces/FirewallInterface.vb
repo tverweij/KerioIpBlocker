@@ -1,7 +1,10 @@
 Public Interface FirewallInterface
 
+  //The user to use when the software connects to the firewall
+  Property UserName As String
+
   //The password to use when the software connects to the firewall
-  Property AdminPassword As String
+  Property Password As String
 
   //Login to the firewall
   Sub Login
@@ -23,6 +26,10 @@ Public Interface FirewallInterface
 
   //Apply the changes made to the Address groups
   Sub ApplyIPChanges
+
+  //Get the IP Addresses logged in the filter logs, for the rule "Block other traffic" (the last rule that blocks everything that was not handled by another rule)
+  //This function returns a dicionary with IP addresses and ports it tried to connect to
+  Function GetBlockedConnections As RemObjects.Elements.RTL.Dictionary(Of String, String)
 
 End Interface
 
