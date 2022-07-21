@@ -22,7 +22,8 @@ Public Class AbuseIpDbChecker
   //   Premium plan:  max 500.000 IP's cached at startup + max 50.000 extra checks a day //
   //                                                                                     //
   // At the moment you are out of checks:                                                //
-  //                 the cache is still working, but new IP's are all allowed            //
+  //                 the cache is still working, but new IP's are all allowed if they    //
+  //                                               were not blocked in the past          //
   //                                                                                     //
   /////////////////////////////////////////////////////////////////////////////////////////
 
@@ -30,8 +31,11 @@ Public Class AbuseIpDbChecker
 
   Public Property API_Key As String Implements BlackListInterface.API_Key
 
+  //checks if the IP is Ok or not
   Public Function CheckIP(IP As String) As Boolean Implements BlackListInterface.CheckIP
-    If Not ExistsInCache(IP) Then
+    If  ExistsInCache(IP) Then
+      Return Cache(IP)
+    Else
       //check online
       Try
         Dim IpOk = IsIpOk(IP)
@@ -44,18 +48,19 @@ Public Class AbuseIpDbChecker
         End If
         //update the lookup file
         My.Computer.FileSystem.WriteAllText(LookupFile, IP & "|" & IpOk.ToString & "|" & Now.ToString & Chr(10), True)
+        Return Cache(IP)
+
       Catch ex As Exception
-        RemObjects.Elements.RTL.writeLn("IP Lookup error: " & ex.Message)
-        //check the cache again for old entries
+        //failed to get the online information (out of request)
+        //check the cache again for old entries, without looking for the TTL
         If Cache.ContainsKey(IP) Then
           Return Cache(IP)
         Else
-          //can not check, so just allow
+          //It's not in the cache, means we can not check, so just allow
           Return True
         End If
       End Try
     End If
-    Return Cache(IP)
   End Function
 
   Private BlackListRead As Boolean = False
@@ -84,12 +89,13 @@ Public Class AbuseIpDbChecker
         //read the saved cache
         BlackList = My.Computer.FileSystem.ReadAllText(BlackListFile)
       End If
-    Catch ex As Exception
-      //we load the last saved blacklist
+
+    Catch
+      //we can not load the blacklist online (too many requests or connection problem) - load and reuse the last saved blacklist
       BlackList = My.Computer.FileSystem.ReadAllText(BlackListFile)
     End Try
 
-    //Load the blacklist in the cache
+    //Load the downloaded blacklist in the cache
     If Not BlackListRead Then
       For Each IP As String  In Split(BlackList, Chr(10))
         If Not ExistsInCache(IP) Then
@@ -103,6 +109,7 @@ Public Class AbuseIpDbChecker
     End If
   End Sub
 
+  //Reload the last used cache
   Public Sub ReadLookupCache Implements BlackListInterface.ReadLookupCache
     If System.IO.file.Exists(LookupFile) Then
       Dim Lookup As String = My.Computer.FileSystem.ReadAllText(LookupFile)
@@ -125,9 +132,75 @@ Public Class AbuseIpDbChecker
           End If
         End If
       Next
-      //write the file again, but only with the still valid entries
+      //write the file again, but only with the entries that are still valid
       My.Computer.FileSystem.WriteAllText(LookupFile, NewLookupFile.ToString, false)
     End If
+  End Sub
+
+  //Report an abuse IP with the ports it tried to open
+  Public Sub ReportIP(ip As String, ports As String) Implements BlackListInterface.ReportIP
+    Dim Reason As String
+    Dim categories As string
+    Dim Checker = "," & ports & ","
+    If (Checker).Contains(",20,") OrElse
+       (Checker).Contains(",22,") OrElse
+       (Checker).Contains(",23,") OrElse
+       (Checker).Contains(",69,") OrElse
+       (Checker).Contains(",88,") OrElse
+       (Checker).Contains(",161,") OrElse
+       (Checker).Contains(",445,") OrElse
+       (Checker).Contains(",464,") OrElse
+       (Checker).Contains(",465,") OrElse
+       (Checker).Contains(",500,") OrElse
+       (Checker).Contains(",587,") OrElse
+       (Checker).Contains(",749,") OrElse
+       (Checker).Contains(",750,") OrElse
+       (Checker).Contains(",8080,") Orelse
+       (Checker).Contains(",1433,") Orelse
+       (Checker).Contains(",3389,") Then
+      categories = "15" //hacking
+    Else
+      categories = "14" //portscan
+    End If
+    If ("," & ports & ",").Contains(",22,") Then
+      categories &= ",22" //ssh
+    End If
+    
+    //sort the ports and add a space after the comma for displaying purposes
+    Dim prt As New System.Collections.Generic.List(Of string)
+    prt.AddRange(Split(ports,","))
+    prt.sort
+    ports = Join(prt.ToArray, ", ")
+    If ports.IndexOf(",") = -1 Then
+      Reason = "Tried to connect to port " & ports
+    Else
+      Reason = "Tried to connect to ports " & ports
+    End If
+    
+    Reason = Reason.Replace(",", ", ") //layout for display on website
+    Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create($"https://api.abuseipdb.com/api/v2/report?ip={ip}&comment={Reason}&categories={categories}"), HttpWebRequest)
+    myReq.Method = "POST"
+    myReq.Headers.Add("Key", API_Key)
+    myReq.Accept = "text/plain"
+
+    Dim myResp = myReq.GetResponse
+    Dim myReader = New System.IO.StreamReader(myResp.GetResponseStream)
+
+    //{"data":{"ipAddress":"118.193.21.186","abuseConfidenceScore":100}}
+    Dim ResponseData = myReader.ReadToEnd
+
+    //Add to cache (response data tells us the current abuse score, so we can use that info, saving another online lookup)
+    Dim IpOK As Boolean = Not ResponseData.Contains("""abuseConfidenceScore"":100")
+    Dim TTL = Now
+    If Not ExistsInCache(ip) Then
+      Cache.Add(ip, IpOK)
+      Cache_TTL.Add(ip, TTL)
+    Else
+      Cache(ip) = IpOK
+      Cache_TTL(ip) = TTL
+    End If
+    //persist this entry
+    My.Computer.FileSystem.WriteAllText(LookupFile, ip & "|" & IpOK.ToString & "|" & TTL.ToString & Chr(10), True)
   End Sub
 
   /////////////////////////////////////////////////////////////////////////////////////////
@@ -141,6 +214,7 @@ Public Class AbuseIpDbChecker
   Private Cache_TTL As New RemObjects.Elements.RTL.Dictionary(Of String, DateTime)
   Private UseTTL As Integer = 24 //cache is valid for 24 hours
 
+  //Check if the requested IP is in the cache - if it's in and older than the UseTTL value in hours, the IP is reported as not being in the cache
   Private Function ExistsInCache(IP As String) As Boolean
     If Cache_TTL.ContainsKey(IP) Then
       If DateAdd(DateInterval.Hour, UseTTL, Cache_TTL(IP)) < DateTime.Now Then
@@ -154,26 +228,22 @@ Public Class AbuseIpDbChecker
     End If
   End Function
 
+  //Check the requested IP online
   Private Function IsIpOk(Ip As String) As Boolean
-    Try
-      Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create($"https://api.abuseipdb.com/api/v2/check?ipAddress={Ip}"), HttpWebRequest)
-      myReq.Method = "GET"
-      myReq.Headers.Add("Key", API_Key)
-      myReq.Accept = "text/plain"
+    Dim myReq As HttpWebRequest = DirectCast(HttpWebRequest.Create($"https://api.abuseipdb.com/api/v2/check?ipAddress={Ip}"), HttpWebRequest)
+    myReq.Method = "GET"
+    myReq.Headers.Add("Key", API_Key)
+    myReq.Accept = "text/plain"
 
-      //myReq.GetRequestStream.Write(System.Text.Encoding.UTF8.GetBytes(JsonData), 0, System.Text.Encoding.UTF8.GetBytes(JsonData).Length)
-      Dim myResp = myReq.GetResponse
-      Dim myReader = New System.IO.StreamReader(myResp.GetResponseStream)
-      Dim ReturnValue As String = myReader.ReadToEnd
+    //myReq.GetRequestStream.Write(System.Text.Encoding.UTF8.GetBytes(JsonData), 0, System.Text.Encoding.UTF8.GetBytes(JsonData).Length)
+    Dim myResp = myReq.GetResponse
+    Dim myReader = New System.IO.StreamReader(myResp.GetResponseStream)
+    Dim ReturnValue As String = myReader.ReadToEnd
 
-      //{"data":{"ipAddress":"193.201.9.89","isPublic":true,"ipVersion":4,"isWhitelisted":false,"abuseConfidenceScore":100,"countryCode":"RU","usageType":"Data Center\/Web Hosting\/Transit","isp":"Infolink LLC","domain":"informlink.ru","hostnames":[],"totalReports":211,"numDistinctUsers":41,"lastReportedAt":"2022-07-07T13:00:02+00:00"}}
-      Dim Score As String = Split(ReturnValue, """abuseConfidenceScore"":")(1)
-      Score = Split(Score, ",")(0)
-      Return Val(Score) < 100
-    Catch ex As Exception
-      System.Diagnostics.Debug.Print("Error: " & ex.Message)
-      Throw ex
-    End Try
+    //{"data":{"ipAddress":"193.201.9.89","isPublic":true,"ipVersion":4,"isWhitelisted":false,"abuseConfidenceScore":100,"countryCode":"RU","usageType":"Data Center\/Web Hosting\/Transit","isp":"Infolink LLC","domain":"informlink.ru","hostnames":[],"totalReports":211,"numDistinctUsers":41,"lastReportedAt":"2022-07-07T13:00:02+00:00"}}
+    Dim Score As String = Split(ReturnValue, """abuseConfidenceScore"":")(1)
+    Score = Split(Score, ",")(0)
+    Return Val(Score) < 100
   End Function
 
 End Class
