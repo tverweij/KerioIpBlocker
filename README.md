@@ -8,6 +8,8 @@ Besides blocking, the software also reports failed connection attemps to the Abu
 
 **Important** If you upgrade, you need to add a new traffic rule, see step 5 at the Configuration of the Kerio Firewall.
 
+Each blocked address will be blocked for 24 hours, or will be freed when the maximum count of addresses is exceeded; in that case the oldest blocked address will be unblocked.
+
 
 This software is build in the next generation of Visual Basic - RemObjects Mercury.
 
@@ -54,13 +56,27 @@ Depending on your plan, you will have an maximum amount of checks - when your ch
 Schedule the software on a Windows machine, with start on boot.
 
 The parameters are:
-KerioIpBlocker.exe -P:AdminPassword -M:MaxCountOfBlockedAddresses -A:APIKeyForAbuseDB
+KerioIpBlocker.exe -U:Username -P:Password -M:MaxCountOfBlockedAddresses -A:APIKeyForAbuseDB -R:MinuteToReport
 
-For MaxCountOfBlockedAddresses:
+**UserName**
+You can supply the username tio use when you are connecting to the Kerion Control Firewall. If you don't supply this parameter, *admin* is used.
+
+**Password**
+Mandatory.
+The password to use when connecting to the Kerio Control Firewall.
+
+**MaxCountOfBlockedAddresses**
 This is the maximum count of addresses that will be blocked at one time. For performance, don't make this too high.
-I myself use 50. 
+If you don't supply this parameter, 50 will be used.
 
-Each blocked address will be blocked for 24 hours, or will be freed when the maximum count of addresses is exceeded; in that case the oldest blocked address will be unblocked.
+**APIKeyForAbuseDB**
+Mandatory.
+The API key that you registered at AbuseIpDB.
+
+**MinuteToReport**
+If you don't supply this parameter, no reporting to AbuseIpDB is performed.
+The reporting is done every hour, on the minute that you supply with this parameter.
+So, if this parameter is 15, the reporting is don at 1:15, 2:15, 3:15 and so on.
 
 # How does it work?
 
