@@ -16,5 +16,7 @@ Public Interface BlackListInterface
   //Reads the persisted cache
   Sub ReadLookupCache
 
+  //reports an IP Address to the blacklist provider
+  Sub ReportIP(ip As String, ports As String)
 
 End Interface
